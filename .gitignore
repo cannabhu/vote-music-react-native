@@ -7,7 +7,6 @@ node_modules/
 .expo/
 dist/
 web-build/
-expo-env.d.ts
 
 # Native
 *.orig.*
@@ -20,6 +19,9 @@ expo-env.d.ts
 # Metro
 .metro-health-check*
 
+.qodo
+.vscode
+
 # debug
 npm-debug.*
 yarn-debug.*
@@ -31,6 +33,9 @@ yarn-error.*
 
 # local env files
 .env*.local
+.env
 
 # typescript
 *.tsbuildinfo
+.qodo
+.vscode
