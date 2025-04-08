@@ -10,7 +10,7 @@ type SongItemProps = {
 	onSuggest?: (item: Track) => void;
 	onVote?: (item: Database["public"]["Tables"]["songs"]["Row"]) => void;
 	isAddingSong?: boolean;
-	canVote?: Promise<boolean>;
+	canVote: boolean;
 };
 
 export default function SongItem({
@@ -49,7 +49,9 @@ export default function SongItem({
 						<ActivityIndicator size="small" color="#000" />
 					) : (
 						<Text
-							className={` ${canVote ? "text-[#FFD700] font-bold" : "text-black font-bold"}`}
+							className={` ${
+								canVote ? "text-[#FFD700] font-bold" : "text-black font-bold"
+							}`}
 						>
 							Suggest
 						</Text>

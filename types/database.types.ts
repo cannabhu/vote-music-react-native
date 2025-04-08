@@ -149,7 +149,7 @@ export type Database = {
 					id?: string;
 					title?: string | null;
 					url?: string | null;
-					vote_count: number;
+					vote_count?: number;
 				};
 				Update: {
 					added_by?: string | null;
@@ -160,7 +160,7 @@ export type Database = {
 					id?: string;
 					title?: string | null;
 					url?: string | null;
-					vote_count: number;
+					vote_count?: number;
 				};
 				Relationships: [
 					{
@@ -168,6 +168,42 @@ export type Database = {
 						columns: ["added_by"];
 						isOneToOne: false;
 						referencedRelation: "users";
+						referencedColumns: ["id"];
+					}
+				];
+			};
+			user_votes: {
+				Row: {
+					session_id: string;
+					song_id: string | null;
+					user_id: string;
+					voted_at: string | null;
+				};
+				Insert: {
+					session_id: string;
+					song_id?: string | null;
+					user_id: string;
+					voted_at?: string | null;
+				};
+				Update: {
+					session_id?: string;
+					song_id?: string | null;
+					user_id?: string;
+					voted_at?: string | null;
+				};
+				Relationships: [
+					{
+						foreignKeyName: "user_votes_session_id_fkey";
+						columns: ["session_id"];
+						isOneToOne: false;
+						referencedRelation: "voting_sessions";
+						referencedColumns: ["id"];
+					},
+					{
+						foreignKeyName: "user_votes_song_id_fkey";
+						columns: ["song_id"];
+						isOneToOne: false;
+						referencedRelation: "songs";
 						referencedColumns: ["id"];
 					}
 				];
@@ -186,7 +222,7 @@ export type Database = {
 					created_at?: string;
 					id?: string;
 					is_admin?: boolean | null;
-					last_voted_time: string;
+					last_voted_time?: string;
 					name?: string | null;
 				};
 				Update: {
@@ -194,46 +230,42 @@ export type Database = {
 					created_at?: string;
 					id?: string;
 					is_admin?: boolean | null;
-					last_voted_time: string;
+					last_voted_time?: string;
 					name?: string | null;
 				};
 				Relationships: [];
 			};
-			votes: {
+			voting_sessions: {
 				Row: {
 					created_at: string;
-					song_id: string;
-					user_id: string;
-					vote_value: boolean | null;
-					voted_at: string | null;
+					end_time: string;
+					id: string;
+					is_active: boolean | null;
+					top_song_id: string | null;
+					updated_at: string | null;
 				};
 				Insert: {
 					created_at?: string;
-					song_id?: string;
-					user_id?: string;
-					vote_value?: boolean | null;
-					voted_at?: string | null;
+					end_time: string;
+					id?: string;
+					is_active?: boolean | null;
+					top_song_id?: string | null;
+					updated_at?: string | null;
 				};
 				Update: {
 					created_at?: string;
-					song_id?: string;
-					user_id?: string;
-					vote_value?: boolean | null;
-					voted_at?: string | null;
+					end_time?: string;
+					id?: string;
+					is_active?: boolean | null;
+					top_song_id?: string | null;
+					updated_at?: string | null;
 				};
 				Relationships: [
 					{
-						foreignKeyName: "votes_song_id_fkey";
-						columns: ["song_id"];
+						foreignKeyName: "voting_sessions_top_song_id_fkey";
+						columns: ["top_song_id"];
 						isOneToOne: false;
 						referencedRelation: "songs";
-						referencedColumns: ["id"];
-					},
-					{
-						foreignKeyName: "votes_user_id_fkey";
-						columns: ["user_id"];
-						isOneToOne: false;
-						referencedRelation: "users";
 						referencedColumns: ["id"];
 					}
 				];
@@ -243,15 +275,28 @@ export type Database = {
 			[_ in never]: never;
 		};
 		Functions: {
+			check_expired_sessions: {
+				Args: Record<PropertyKey, never>;
+				Returns: undefined;
+			};
+			create_new_session: {
+				Args: Record<PropertyKey, never>;
+				Returns: undefined;
+			};
 			generate_password_hash: {
 				Args: {
 					plain_password: string;
 				};
 				Returns: string;
 			};
+			increment_vote: {
+				Args: {
+					song_id: string;
+				};
+				Returns: undefined;
+			};
 			verify_chatroom_password: {
 				Args: {
-					
 					password_attempt: string;
 				};
 				Returns: string;

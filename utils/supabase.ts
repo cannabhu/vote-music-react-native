@@ -1,4 +1,4 @@
-import { Database } from "@/types/database.types";
+import { Database, Tables } from "@/types/database.types";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createClient, User } from "@supabase/supabase-js";
 import { AppState } from "react-native";
@@ -60,11 +60,16 @@ export const getSongs = async (): Promise<Database["public"]["Tables"]["songs"][
 		.order("vote_count", { ascending: false });
 
 	if (songsError) {
-		console.error("Failed to load songs:", songsError);
 		return [];
 	}
 
 	return songsData;
+};
+
+export const loadAndSubscribeToSongs = async (updateSongs: (songs: Tables<"songs">[]) => void) => {
+	// Fetch initial songs data
+	const songs = await getSongs();
+	updateSongs(songs);
 };
 
 export const getNameById = async (userId: string): Promise<string | null> => {
@@ -75,7 +80,7 @@ export const getNameById = async (userId: string): Promise<string | null> => {
 			.eq("id", userId)
 			.maybeSingle();
 
-		if (error || !data ) {
+		if (error || !data) {
 			console.error("Error fetching user name:", error);
 			return null;
 		}
@@ -87,16 +92,17 @@ export const getNameById = async (userId: string): Promise<string | null> => {
 	}
 };
 
-
 export const getChatroomId = async (userId: string): Promise<string | null> => {
 	const { data: chatroomMembers, error: chatroomMemberError } = await supabase
 		.from("chatroom_members")
-		.select(`
+		.select(
+			`
 			chatroom_id,
 			created_at
-		`)
+		`
+		)
 		.eq("user_id", userId)
-		.order('created_at', { ascending: false })
+		.order("created_at", { ascending: false })
 		.limit(1);
 
 	if (chatroomMemberError || !chatroomMembers || chatroomMembers.length === 0) {

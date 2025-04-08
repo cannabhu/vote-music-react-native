@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigation } from "@react-navigation/native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import TrackPlayer, { Track, Event, useTrackPlayerEvents } from "react-native-track-player";
+import TrackPlayer, {
+	Track,
+	Event,
+	useTrackPlayerEvents,
+	AddTrack,
+} from "react-native-track-player";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import {
 	View,
@@ -15,274 +20,174 @@ import {
 
 import { searchSong } from "@/service/fetchSongs";
 import { getData, storeData } from "@/utils/storage";
-import { getSongs, getUser, supabase } from "@/utils/supabase";
-import { Database } from "@/types/database.types";
-import SongItem from "@/screens/SongItem";
+import { loadAndSubscribeToSongs, getSongs, getUser, supabase } from "@/utils/supabase";
+import { Database, Tables } from "@/types/database.types";
+import SongItem from "@/components/SongItem";
 
 import { Colors } from "@/constants/Colors";
-import { useSelector } from "react-redux";
-import { playerSelector } from "@/redux/slices/player";
+import { useDispatch, useSelector } from "react-redux";
+import { playerSelector, setCurrentTrack } from "@/redux/slices/player";
+import { calculateTimeLeft, TimerCountdown } from "@/components/TimerCountdown";
 
 export default function HomeScreen() {
 	const { tint, text } = Colors.dark;
 	const navigation = useNavigation();
 	const { currentTrack } = useSelector(playerSelector);
 
+	const [currentUser, setCurrentUser] = useState<
+		Database["public"]["Tables"]["users"]["Row"] | null
+	>(null);
+
 	const [searchQuery, setSearchQuery] = useState("");
 	const [searchResults, setSearchResults] = useState<any>([]);
 	const [isSearching, setIsSearching] = useState(false);
 	const [addingSongId, setAddingSongId] = useState<string | null>(null);
+	const [songs, setSongs] = useState<Tables<"songs">[]>([]);
+	const [showSongsList, setShowSongsList] = useState(true);
+	const [currentSession, setCurrentSession] = useState<Tables<"voting_sessions"> | null>(null);
 	const [canVote, setCanVote] = useState(false);
-	const [songs, setSongs] = useState<Database["public"]["Tables"]["songs"]["Row"][]>([]);
-	const [showSongsList, setShowSongsList] = useState(false);
-	const [hasAttemptedFinalize, setHasAttemptedFinalize] = useState(false);
-	const [currentSession, setCurrentSession] = useState<
-		Database["public"]["Tables"]["voting_sessions"]["Row"] | null
-	>(null);
-	const [winningSongSession, setWinningSongSession] = useState<
-		Database["public"]["Tables"]["voting_sessions"]["Row"] | null
-	>(null);
-	const [previousWinningSong, setPreviousWinningSong] = useState<
-		Database["public"]["Tables"]["songs"]["Row"] | null
-	>(null);
 
-	const prevSessionRef = useRef(currentSession);
+	const dispatch = useDispatch();
 
-	// Calculate time remaining
-	const calculateTimeLeft = () => {
-		if (!currentSession?.end_time) return 0;
-		const end = new Date(currentSession.end_time).getTime();
-		const now = Date.now();
-		return Math.max(Math.ceil((end - now) / 1000), 0);
-	};
-	// Add state for time left
-	const [timeRemaining, setTimeRemaining] = useState(calculateTimeLeft());
+	// Check if user can vote
+	const checkCanVote = () => {
+		if (!currentUser) return false;
 
-	const loadSongs = async () => {
-		const songs = await getSongs();
-		setSongs(songs);
+		const timeLeft = currentSession ? calculateTimeLeft(currentSession) : 0;
+
+		const canVote = timeLeft > 0;
+		setCanVote(canVote);
 	};
 
-	const checkCanVote = async () => {
-		const user = await getUser();
-		if (!user) return false;
-
-		const currentTime = new Date();
-		const lastVotedTime = user.last_voted_time ? new Date(user.last_voted_time) : new Date(0);
-		const timeDifferenceInSeconds = Math.floor(
-			(currentTime.getTime() - lastVotedTime.getTime()) / 1000
-		);
-
-		return timeDifferenceInSeconds >= 20;
-	};
-
-	// Setup TrackPlayer
-	useEffect(() => {
-		const setupPlayer = async () => {
+	// Setup track player
+	const setupPlayer = async () => {
+		try {
+			// Check if player is already initialized
+			const setupResult = await TrackPlayer.getState();
+			if (setupResult === null) {
+				await TrackPlayer.setupPlayer();
+			}
+		} catch (error) {
+			// If getState throws an error, it means player is not initialized
 			try {
-				// Check if player is already initialized
-				const setupResult = await TrackPlayer.getState();
-				if (setupResult === null) {
-					await TrackPlayer.setupPlayer();
-				}
-			} catch (error) {
-				// If getState throws an error, it means player is not initialized
-				try {
-					await TrackPlayer.setupPlayer();
-				} catch (setupError) {
-					console.log("Error setting up player:", setupError);
-				}
+				await TrackPlayer.setupPlayer();
+			} catch (setupError) {
+				console.error("Error setting up player:", setupError);
 			}
-		};
-		setupPlayer();
-	}, []);
+		}
+	};
 
-	// Subscribe to real-time session updates
-	useEffect(() => {
-		// Initial fetch
-		const fetchInitialSession = async () => {
-			console.log("Fetching initial session...");
-			const { data } = await supabase
+	// Fetch initial session
+	const fetchInitialSession = async () => {
+		const { data } = await supabase
+			.from("voting_sessions")
+			.select("*")
+			.order("created_at", { ascending: false })
+			.limit(1)
+			.single();
+
+		if (data) {
+			setCurrentSession(data);
+		} else {
+			const { error } = await supabase
 				.from("voting_sessions")
-				.select("*")
-				.order("created_at", { ascending: false })
-				.limit(1)
+				.insert({
+					created_at: new Date().toISOString(),
+					end_time: new Date().toISOString(),
+					is_active: true,
+				})
+				.select()
 				.single();
-
-			if (!data) console.log("No data from Initial fetch");
-			console.log("Initial session data:", data);
-			if (data) {
-				setCurrentSession(data);
-				if (data.is_active) {
-					console.log("Initial session is active, checking user vote");
-					checkUserVote(data.id);
-				} else if (data.top_song_id) {
-					console.log("Initial session has top song, playing:", data.top_song_id);
-					playTopSong(data.top_song_id);
-				}
-			} else {
-				console.log("No session found, creating new session...");
-				const { error } = await supabase.rpc("create_new_session");
-				if (error) {
-					console.error("Error creating new session:", error);
-				} else {
-					console.log("New session created successfully");
-					// Fetch the newly created session
-					const { data: newSession } = await supabase
-						.from("voting_sessions")
-						.select("*")
-						.order("created_at", { ascending: false })
-						.limit(1)
-						.single();
-
-					if (newSession) {
-						console.log("newly created session: ", newSession);
-						setCurrentSession(newSession);
-					}
-				}
-			}
-		};
-
-		fetchInitialSession();
-
-		// Set up realtime subscription
-		console.log("Setting up realtime subscription...");
-		const channel = supabase.channel("voting-sessions-channel").on(
-			"postgres_changes",
-			{
-				event: "*",
-				schema: "public",
-				table: "voting_sessions",
-			},
-			async (payload) => {
-				console.log("Received realtime update:", payload);
-
-				// Fetch latest session
-				const { data: latestSession } = await supabase
+			if (!error) {
+				const { data: newSession } = await supabase
 					.from("voting_sessions")
 					.select("*")
 					.order("created_at", { ascending: false })
 					.limit(1)
 					.single();
 
-				if (latestSession) {
-					const previousSession = prevSessionRef.current;
-
-					console.log("previous session after new session:", previousSession);
-					if (previousSession?.id !== latestSession.id) {
-						// Fetch updated previous session
-						const { data: updatedPreviousSession } = await supabase
-							.from("voting_sessions")
-							.select("*")
-							.eq("id", previousSession.id)
-							.single();
-
-						setWinningSongSession(updatedPreviousSession);
-					}
+				if (newSession) {
+					useRunOnce(() => {
+						setCurrentSession(newSession);
+					});
 				}
-
-				// Handle session updates
-
-				setCurrentSession(latestSession);
-			}
-		); // Start the subscription
-		channel.subscribe((status) => {
-			console.log("Subscription status:", status);
-		});
-
-		return () => {
-			console.log("Cleaning up subscription...");
-			channel.unsubscribe();
-		};
-	}, []);
-
-	// Update ref whenever currentSession changes
-	useEffect(() => {
-		prevSessionRef.current = currentSession;
-	}, [currentSession]);
-
-	// Handle session updates
-	useEffect(() => {
-		if (currentSession) {
-			if (currentSession.is_active) {
-				checkUserVote(currentSession.id);
-			} else if (currentSession.top_song_id) {
-				playTopSong(currentSession.top_song_id);
 			}
 		}
-	}, [currentSession]);
+	};
 
-	const playTopSong = async (songId: string) => {
-		console.log("Attempting to play song from the latest session:", songId);
+	const votingSessionsChannel = supabase.channel("voting-sessions-channel").on(
+		"postgres_changes",
+		{
+			event: "INSERT",
+			schema: "public",
+			table: "voting_sessions",
+		},
+		async (payload) => {
+			const { data: latestSession } = await supabase
+				.from("voting_sessions")
+				.select("*")
+				.order("created_at", { ascending: false })
+				.eq("is_active", true)
+				.limit(1)
+				.single();
+
+			if (latestSession && latestSession.id !== currentSession?.id) {
+				setCurrentSession(latestSession);
+			}
+		}
+	);
+
+	// Play song with ID
+	const playSongWithId = async (songId: string) => {
 		const { data: song } = await supabase.from("songs").select("*").eq("id", songId).single();
-		console.log("Retrieved song data:", song);
 
 		if (song) {
 			try {
-				console.log("Resetting track player...");
-				await TrackPlayer.reset();
-				console.log("Adding song to track player:", song);
-				await TrackPlayer.add({
-					id: song.id,
-					url: song.url,
-					title: song.title,
-					artist: song.artist,
-					artwork: song.artwork,
+				await setupPlayer();
+				const track: AddTrack = {
+					url: song.url || "",
+					title: song.title || "",
+					artist: song.artist || "",
+					artwork: song.artwork || "",
 					duration: parseInt(song.duration || "0"),
-				});
-				console.log("Starting playback...");
-				await TrackPlayer.play();
+				};
+				await TrackPlayer.reset();
+				await TrackPlayer.add(track);
+
+				const playbackState = await TrackPlayer.getPlaybackState();
+				if (playbackState.state !== "playing") {
+					TrackPlayer.play();
+				}
 			} catch (error) {
-				console.error("Error during playback:", error);
+				// Handle error silently
 			}
 		}
 	};
 
-	// check playback state
-	useEffect(() => {
-		const checkInitialState = async () => {
-			const playbackState = await TrackPlayer.getPlaybackState();
-			setShowSongsList(playbackState.state !== "playing");
-		};
-		loadSongs();
-		checkInitialState();
-	}, []);
-
-	// Handle track playback completion
-	useTrackPlayerEvents([Event.PlaybackActiveTrackChanged], async (event) => {
-		console.log("PlaybackActiveTrackChanged event:", event);
-		if (!event.track) {
-			console.log("No active track, creating new session...");
-			// When track finishes, create new session
-			const { error } = await supabase.rpc("create_new_session");
-			if (error) {
-				console.error("Error creating new session:", error);
-			} else {
-				console.log("New session created successfully");
-			}
-		}
-	});
-
-	useTrackPlayerEvents([Event.PlaybackState], async (event) => {
-		if (event.type === Event.PlaybackState) {
-			const playbackState = await TrackPlayer.getPlaybackState();
-			setShowSongsList(playbackState.state !== "playing");
-		}
-	});
-
-	// Check user's vote status
-	const checkUserVote = async (sessionId: string) => {
-		const user = await getUser();
-		if (!user) return;
-
-		const { data } = await supabase
-			.from("user_votes")
-			.select("song_id")
-			.eq("user_id", user.id)
-			.eq("session_id", sessionId)
-			.single();
+	// Show songs list if not playing
+	const showSongsListIfNotPlaying = async () => {
+		const playbackState = await TrackPlayer.getPlaybackState();
+		setShowSongsList(playbackState.state !== "playing");
 	};
 
+	// Set up track player event handlers
+	const setUpTrackPlayerEventHandlers = () => {
+		// Handle track playback completion
+		useTrackPlayerEvents([Event.PlaybackActiveTrackChanged], async (event) => {
+			if (event.type === Event.PlaybackActiveTrackChanged) {
+				const trackIndex = await TrackPlayer.getActiveTrackIndex();
+				// Handle null/undefined case first
+				if (trackIndex == null) {
+					dispatch(setCurrentTrack(null));
+					return;
+				}
+				const playingTrack = await TrackPlayer.getTrack(trackIndex);
+				dispatch(setCurrentTrack(playingTrack ?? null));
+			}
+		});
+	};
+
+	// Handle search
 	const handleSearch = async (song: string) => {
 		if (song.trim() === "") {
 			setSearchResults([]);
@@ -300,23 +205,30 @@ export default function HomeScreen() {
 		}
 	};
 
+	// Handle suggest song
 	const handleSuggestSong = async (spotifyTrack: Track) => {
 		setAddingSongId(spotifyTrack.id);
 		try {
-			const user = await getUser();
-			if (!user) throw new Error("User not authenticated");
+			if (!currentUser) throw new Error("User not authenticated");
 
 			const newSong: Database["public"]["Tables"]["songs"]["Row"] = {
 				id: spotifyTrack.id,
 				url: spotifyTrack.url || "",
 				title: spotifyTrack.title || "",
 				artist: spotifyTrack.artist || "",
-				vote_count: 1,
+				vote_count: 0,
 				artwork: spotifyTrack.artwork || require("@/assets/loginaudio.png"),
 				duration: spotifyTrack.duration?.toString() || "0",
 				created_at: new Date().toISOString(),
-				added_by: user.id,
+				added_by: currentUser.id,
 			};
+
+			const { error: songError } = await supabase.from("songs").insert(newSong);
+
+			if (songError) {
+				alert("Failed to add song. Please try again.");
+				return;
+			}
 
 			await voteForSong(newSong);
 		} catch (error) {
@@ -327,86 +239,141 @@ export default function HomeScreen() {
 		}
 	};
 
-	//Get User status
-
-	useEffect(() => {
-		const userStatus = async () => {
-			const user = await getUser();
-			await storeData("@userInfo", user?.id);
-			if (!user) return;
-		};
-		userStatus();
-	}, []);
-
-	const voteForSong = async (song: Database["public"]["Tables"]["songs"]["Row"]) => {
-		console.log("Voting for song: ", song);
+	// Get and set current user
+	const getAndSetCurrentUser = async () => {
 		const user = await getUser();
+		setCurrentUser(user);
 		if (!user) return;
-
-		if (!currentSession?.is_active) {
-			alert("No active voting session");
-			return;
-		}
-
-		// Check existing vote
-		const { data: existingVote } = await supabase
-			.from("user_votes")
-			.select()
-			.eq("user_id", user.id)
-			.eq("session_id", currentSession.id);
-
-		if (existingVote && existingVote.length > 0) {
-			alert("You already voted in this session!");
-			return;
-		}
-
-		const { error: voteError } = await supabase.from("user_votes").insert({
-			user_id: user.id,
-			session_id: currentSession.id,
-			song_id: song.id,
-		});
-
-		if (voteError) {
-			return;
-		}
-
-		// Update song votes
-		const { error: songError } = await supabase.rpc("increment_vote", {
-			song_id: song.id,
-		});
-
-		if (songError) console.error("Vote update failed:", songError);
 	};
 
-	useEffect(() => {
-		const timer = setInterval(async () => {
-			const newTimeLeft = calculateTimeLeft();
-			setTimeRemaining(newTimeLeft);
+	// Vote for song
+	const voteForSong = async (song: Database["public"]["Tables"]["songs"]["Row"]) => {
+		setAddingSongId(song.id);
 
-			// If time has run out, update the session to trigger the finalize_voting_session function
-			if (newTimeLeft === 0 && currentSession?.is_active && !hasAttemptedFinalize) {
-				console.log("Session expired, updating to trigger finalization...");
-				setHasAttemptedFinalize(true); // Prevent further attempts
+		try {
+			if (!currentUser) return;
 
-				const { error } = await supabase
-					.from("voting_sessions")
-					.update({ is_active: true }) // Force an update to trigger the finalize_voting_session
-					.eq("id", currentSession.id);
-
-				if (error) {
-					console.error("Error updating expired session:", error);
-				}
+			if (!currentSession?.is_active) {
+				alert("No active voting session");
+				return;
 			}
-		}, 1000);
 
-		// Cleanup interval on unmount
-		return () => clearInterval(timer);
-	}, [currentSession, hasAttemptedFinalize]);
+			const { data: existingVote } = await supabase
+				.from("user_votes")
+				.select()
+				.eq("user_id", currentUser.id)
+				.eq("session_id", currentSession.id);
 
-	// Reset the finalization flag when the session changes
+			if (existingVote && existingVote.length > 0) {
+				alert("You already voted in this session!");
+				return;
+			}
+
+			const { error: voteError } = await supabase.from("user_votes").insert({
+				user_id: currentUser.id,
+				session_id: currentSession.id,
+				song_id: song.id,
+			});
+
+			if (voteError) {
+				alert("Failed to vote. Please try again.");
+				return;
+			}
+
+			const { error: songError } = await supabase.rpc("increment_vote", {
+				song_id: song.id,
+			});
+
+			if (songError) {
+				alert("Failed to increment vote count. Please try again.");
+				return;
+			}
+
+			const { error: userError, data: updatedUser } = await supabase
+				.from("users")
+				.update({
+					last_voted_time: new Date().toISOString(),
+				})
+				.eq("id", currentUser.id)
+				.single();
+
+			if (updatedUser) {
+				setCurrentUser(updatedUser);
+			}
+
+			setCanVote(false);
+			await loadSongs();
+		} finally {
+			setAddingSongId(null);
+		}
+	};
+
+	const playLastVotedTopSongFromDB = async () => {
+		const { data: session } = await supabase
+			.from("voting_sessions")
+			.select("*")
+			.order("created_at", { ascending: false })
+			.not("top_song_id", "is", null)
+			.eq("is_active", false)
+			.limit(1)
+			.single();
+		if (session && session.top_song_id) {
+			const { data: song } = await supabase
+				.from("songs")
+				.select("*")
+				.eq("id", session.top_song_id)
+				.single();
+			if (song) {
+				playSongWithId(song.id);
+				return;
+			}
+		}
+	};
+
+	const loadSongs = async () => {
+		await loadAndSubscribeToSongs((songs) => {
+			setSongs(songs);
+		});
+	};
+
+	// Default useEffect
 	useEffect(() => {
-		setHasAttemptedFinalize(false);
-	}, [currentSession?.id]);
+		setupPlayer();
+		getAndSetCurrentUser();
+		loadSongs();
+		// showSongsListIfNotPlaying();
+		fetchInitialSession();
+
+		votingSessionsChannel.subscribe();
+		return () => {
+			votingSessionsChannel.unsubscribe();
+		};
+	}, []);
+
+	useEffect(() => {
+		if (currentSession && currentSession.is_active) {
+			loadSongs().then(() => {
+				checkCanVote();
+				playLastVotedTopSongFromDB();
+			});
+		}
+	}, [currentSession]);
+
+	// Set up track player event handlers
+	setUpTrackPlayerEventHandlers();
+
+	function useRunOnce<T>(callback: () => T | Promise<T>): void {
+		const hasRun = useRef<boolean>(false);
+
+		useEffect(() => {
+			if (hasRun.current) {
+				return;
+			}
+
+			hasRun.current = true;
+			callback();
+		}, []);
+	}
 
 	return (
 		<SafeAreaView className="flex-1 bg-black">
@@ -465,9 +432,11 @@ export default function HomeScreen() {
 									Vote Next Song
 								</Text>
 								{currentSession && (
-									<Text className="text-sm mt-1" style={{ color: tint }}>
-										Time remaining: {timeRemaining}s
-									</Text>
+									<TimerCountdown
+										currentSession={currentSession}
+										tint={tint}
+										updateCanVote={setCanVote}
+									/>
 								)}
 							</View>
 						)}
@@ -510,7 +479,7 @@ export default function HomeScreen() {
 									isSearchResult={false}
 									onSuggest={handleSuggestSong}
 									isAddingSong={addingSongId === item.id}
-									canVote={checkCanVote()}
+									canVote={canVote}
 									onVote={voteForSong}
 								/>
 							)}
