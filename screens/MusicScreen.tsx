@@ -1,15 +1,7 @@
-import React, { useEffect, useState } from "react";
-import { TouchableOpacity, ImageBackground } from "react-native";
-import { FontAwesome5, Ionicons } from "@expo/vector-icons";
+import { ImageBackground } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { View } from "react-native";
 import { PlayerSlider } from "@/components/PlayerSlider";
-import TrackPlayer, {
-	State,
-	usePlaybackState,
-	Event,
-	useTrackPlayerEvents,
-} from "react-native-track-player";
 import SongInfo from "@/components/SongInfo";
 import { useSelector } from "react-redux";
 import { playerSelector } from "@/redux/slices/player";

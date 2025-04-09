@@ -47,8 +47,6 @@ export default function ChatScreen({ route }: Props) {
 
 	const { chatroomId } = route.params;
 
-	console.log("message: ", messages);
-
 	// Realtime subscription
 	const setupRealtime = () => {
 		const subscription = supabase

@@ -226,7 +226,10 @@ export default function HomeScreen() {
 			const { error: songError } = await supabase.from("songs").insert(newSong);
 
 			if (songError) {
+				setIsSearching(false);
+				setSearchResults([]);
 				alert("Failed to add song. Please try again.");
+
 				return;
 			}
 
@@ -236,6 +239,8 @@ export default function HomeScreen() {
 			alert("Failed to add song. Please try again.");
 		} finally {
 			setAddingSongId(null);
+			setIsSearching(false);
+			setSearchResults([]);
 		}
 	};
 
